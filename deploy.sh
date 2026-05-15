@@ -12,7 +12,7 @@ CONTAINER_NAME="nuai-converter"
 SERVICE_NAME="nuai-web"
 IMAGE_NAME="nuai-converter-local:latest"
 SOURCE_DIR_NAME="source"
-SOURCE_REPO_URL="${SOURCE_REPO_URL:-}"
+SOURCE_REPO_URL="${SOURCE_REPO_URL:-https://github.com/inimemail/nuai-converter.git}"
 SOURCE_REPO_BRANCH="${SOURCE_REPO_BRANCH:-main}"
 DEFAULT_WEB_PORT="${DEFAULT_WEB_PORT:-41739}"
 
@@ -133,9 +133,9 @@ sync_project_source() {
     fi
 
     if [[ -d "${dest}/.git" ]]; then
-        [[ -n "$SOURCE_REPO_URL" ]] || die "未设置 SOURCE_REPO_URL，无法从 git 更新源码"
         require_cmd git
         info "从 ${SOURCE_REPO_URL} (${SOURCE_REPO_BRANCH}) 更新源码 ..."
+        git -C "$dest" remote set-url origin "$SOURCE_REPO_URL" 2>/dev/null || true
         git -C "$dest" fetch --depth 1 origin "$SOURCE_REPO_BRANCH" || return 1
         git -C "$dest" checkout -f FETCH_HEAD || return 1
         cp "${BASH_SOURCE[0]}" "${workdir}/deploy.sh" 2>/dev/null || true
@@ -143,13 +143,11 @@ sync_project_source() {
         return 0
     fi
 
-    if [[ -f "${dest}/Dockerfile" && -f "${dest}/docs/index.html" ]]; then
-        warn "未找到当前源码目录，继续使用已有源码: ${dest}"
-        return 0
-    fi
-
     if [[ -n "$SOURCE_REPO_URL" ]]; then
         require_cmd git
+        if [[ -f "${dest}/Dockerfile" && -f "${dest}/docs/index.html" ]]; then
+            warn "已有 source 不是 git 仓库，将重新拉取源码以便部署/升级。"
+        fi
         info "克隆 ${SOURCE_REPO_URL} (${SOURCE_REPO_BRANCH}) 到 ${dest} ..."
         mkdir -p "$workdir"
         rm -rf "$dest"
@@ -172,9 +170,11 @@ create_env_file() {
     local workdir="$1"
     local host_port="$2"
 
-    cat > "${workdir}/.env" <<EOF
+cat > "${workdir}/.env" <<EOF
 PORT=${host_port}
 TZ=Asia/Shanghai
+SOURCE_REPO_URL=${SOURCE_REPO_URL}
+SOURCE_REPO_BRANCH=${SOURCE_REPO_BRANCH}
 EOF
     chmod 600 "${workdir}/.env"
 }
@@ -221,6 +221,7 @@ show_access() {
     echo -e "环境文件: \033[33m${workdir}/.env\033[0m"
     echo "--------------------------------------------------"
     echo "端口映射: ${host_port} -> 80"
+    echo "源码仓库: ${SOURCE_REPO_URL} (${SOURCE_REPO_BRANCH})"
     echo "修改端口: 编辑 ${workdir}/.env 的 PORT 后执行重启"
     echo "=================================================="
     echo ""
@@ -525,6 +526,7 @@ main_menu() {
     wd="$(get_workdir)"
     echo -e "部署路径: \033[36m${wd:-未部署}\033[0m"
     echo "默认端口: ${DEFAULT_WEB_PORT}"
+    echo "源码仓库: ${SOURCE_REPO_URL} (${SOURCE_REPO_BRANCH})"
     echo "---------------------------------------------------"
     echo "  1) 一键部署"
     echo "  2) 升级服务"
