@@ -1,0 +1,8 @@
+services:
+  nuai-converter:
+    build: .
+    image: nuai-converter:latest
+    container_name: nuai-converter
+    ports:
+      - "${PORT:-41739}:80"
+    restart: unless-stopped
