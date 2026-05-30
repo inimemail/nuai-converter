@@ -2053,7 +2053,7 @@
 
       .segmented {
         display: grid;
-        grid-template-columns: repeat(4, minmax(0, 1fr));
+        grid-template-columns: repeat(7, minmax(0, 1fr));
         width: 100%;
         min-width: 0;
         padding: 4px;
@@ -2068,7 +2068,7 @@
         background: transparent;
         color: var(--muted-strong);
         cursor: pointer;
-        font-size: 0.84rem;
+        font-size: 0.78rem;
         font-weight: 820;
         transition:
           background 140ms ease,
@@ -2572,6 +2572,9 @@
             <span>CPA</span>
             <span>Cockpit</span>
             <span>9router</span>
+            <span>Codex</span>
+            <span>AxonHub</span>
+            <span>Codex-Manager</span>
           </div>
         </div>
         <div class="meta-row" aria-label="处理方式">
@@ -2587,6 +2590,9 @@
           <button type="button" data-format="cpa" aria-pressed="false">CPA</button>
           <button type="button" data-format="cockpit" aria-pressed="false">Cockpit</button>
           <button type="button" data-format="9router" aria-pressed="false">9router</button>
+          <button type="button" data-format="codex" aria-pressed="false">Codex</button>
+          <button type="button" data-format="axonhub" aria-pressed="false">AxonHub</button>
+          <button type="button" data-format="codexmanager" aria-pressed="false">Codex-Manager</button>
         </div>
         <div class="actions">
           <button class="button button-secondary" id="copy-output" type="button" disabled>复制输出</button>
@@ -2690,6 +2696,9 @@
           cpa: "CPA",
           cockpit: "Cockpit",
           "9router": "9router",
+          codex: "Codex",
+          axonhub: "AxonHub",
+          codexmanager: "Codex-Manager",
         };
 
         const state = {
@@ -2735,6 +2744,8 @@
           sessionToken: "paste-real-session-token-here",
           authProvider: "openai",
         };
+
+        const AXONHUB_PLACEHOLDER_REFRESH_TOKEN = "__missing_refresh_token__";
 
         function isPlainObject(value) {
           return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -2842,6 +2853,15 @@
           return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
         }
 
+        function unixSecondsFromJwtExp(value) {
+          const numeric = Number(value);
+          if (!Number.isFinite(numeric) || numeric <= 0) {
+            return undefined;
+          }
+
+          return Math.trunc(numeric);
+        }
+
         function epochSecondsFromValue(value) {
           if (value === undefined || value === null || value === "") {
             return 0;
@@ -2884,7 +2904,7 @@
             payload.email = email;
           }
 
-          return `${encodeBase64UrlJson({ alg: "none", typ: "JWT", cpa_synthetic: true })}.${encodeBase64UrlJson(payload)}.`;
+          return `${encodeBase64UrlJson({ alg: "none", typ: "JWT", cpa_synthetic: true })}.${encodeBase64UrlJson(payload)}.synthetic`;
         }
 
         function getExpiresIn(expiresAt, now = new Date()) {
@@ -2898,6 +2918,15 @@
           }
 
           return Math.max(0, Math.floor((expiresMs - now.getTime()) / 1000));
+        }
+
+        function getAxonHubLastRefresh(expiresAt, now = new Date()) {
+          const expiresMs = expiresAt ? new Date(expiresAt).getTime() : NaN;
+          if (Number.isNaN(expiresMs)) {
+            return normalizeTimestamp(now);
+          }
+
+          return new Date(expiresMs - 60 * 60 * 1000).toISOString();
         }
 
         function stripUnavailable(value) {
@@ -2988,6 +3017,8 @@
               const token = firstNonEmpty(
                 item.accessToken,
                 item.access_token,
+                item.tokens?.accessToken,
+                item.tokens?.access_token,
                 item.token?.accessToken,
                 item.token?.access_token,
                 item.credentials?.accessToken,
@@ -2996,6 +3027,12 @@
               const hasIdentity = isPlainObject(item.user) || firstNonEmpty(
                 item.email,
                 item.name,
+                item.label,
+                item.meta?.label,
+                item.tokens?.accountId,
+                item.tokens?.account_id,
+                item.tokens?.chatgptAccountId,
+                item.tokens?.chatgpt_account_id,
                 item.providerSpecificData?.chatgptAccountId,
                 item.providerSpecificData?.chatgpt_account_id,
                 item.id,
@@ -3044,6 +3081,8 @@
           const accessToken = firstNonEmpty(
             record.accessToken,
             record.access_token,
+            record.tokens?.accessToken,
+            record.tokens?.access_token,
             record.token?.accessToken,
             record.token?.access_token,
             record.credentials?.accessToken,
@@ -3055,6 +3094,8 @@
           const sessionToken = firstNonEmpty(
             record.sessionToken,
             record.session_token,
+            record.tokens?.sessionToken,
+            record.tokens?.session_token,
             record.token?.sessionToken,
             record.token?.session_token,
             record.credentials?.session_token,
@@ -3062,6 +3103,8 @@
           const refreshToken = firstNonEmpty(
             record.refreshToken,
             record.refresh_token,
+            record.tokens?.refreshToken,
+            record.tokens?.refresh_token,
             record.token?.refreshToken,
             record.token?.refresh_token,
             record.credentials?.refresh_token,
@@ -3069,6 +3112,8 @@
           const inputIdToken = firstNonEmpty(
             record.idToken,
             record.id_token,
+            record.tokens?.idToken,
+            record.tokens?.id_token,
             record.token?.idToken,
             record.token?.id_token,
             record.credentials?.id_token,
@@ -3079,6 +3124,7 @@
           const auth = getOpenAIAuthSection(payload);
           const idAuth = getOpenAIAuthSection(idPayload);
           const profile = getOpenAIProfileSection(payload);
+          const accessTokenExpiresAt = unixSecondsFromJwtExp(payload?.exp);
           const expiresAt = firstNonEmpty(
             payload ? timestampFromUnixSeconds(payload.exp) : undefined,
             normalizeTimestamp(record.expires),
@@ -3089,6 +3135,8 @@
           const email = firstNonEmpty(
             record.user?.email,
             record.email,
+            record.meta?.label,
+            record.label,
             record.credentials?.email,
             record.providerSpecificData?.email,
             profile.email,
@@ -3098,13 +3146,46 @@
           const accountId = firstNonEmpty(
             record.account?.id,
             record.account_id,
+            record.tokens?.accountId,
+            record.tokens?.account_id,
             record.chatgptAccountId,
+            record.chatgpt_account_id,
+            record.meta?.chatgptAccountId,
+            record.meta?.chatgpt_account_id,
+            record.tokens?.chatgptAccountId,
+            record.tokens?.chatgpt_account_id,
             record.providerSpecificData?.chatgptAccountId,
             record.providerSpecificData?.chatgpt_account_id,
             record.credentials?.chatgpt_account_id,
             auth.chatgpt_account_id,
             idAuth.chatgpt_account_id,
             record.provider === "codex" ? record.id : undefined,
+          );
+          const chatgptAccountId = firstNonEmpty(
+            record.chatgptAccountId,
+            record.chatgpt_account_id,
+            record.meta?.chatgptAccountId,
+            record.meta?.chatgpt_account_id,
+            record.tokens?.chatgptAccountId,
+            record.tokens?.chatgpt_account_id,
+            record.providerSpecificData?.chatgptAccountId,
+            record.providerSpecificData?.chatgpt_account_id,
+            record.credentials?.chatgpt_account_id,
+            auth.chatgpt_account_id,
+            idAuth.chatgpt_account_id,
+          );
+          const workspaceId = firstNonEmpty(
+            record.account?.workspaceId,
+            record.account?.workspace_id,
+            record.workspaceId,
+            record.workspace_id,
+            record.meta?.workspaceId,
+            record.meta?.workspace_id,
+            record.providerSpecificData?.workspaceId,
+            record.providerSpecificData?.workspace_id,
+            record.credentials?.workspace_id,
+            payload?.workspace_id,
+            idPayload?.workspace_id,
           );
           const userId = firstNonEmpty(
             record.user?.id,
@@ -3172,6 +3253,8 @@
             name: firstNonEmpty(name, email, sourceName, "ChatGPT Account"),
             platform: "openai",
             type: "oauth",
+            expires_at: accessTokenExpiresAt,
+            auto_pause_on_expired: true,
             concurrency: 10,
             priority: 1,
             credentials: {
@@ -3216,6 +3299,48 @@
             createdAt,
             updatedAt,
           });
+          const axonHubRefreshToken = refreshToken || AXONHUB_PLACEHOLDER_REFRESH_TOKEN;
+          const codexAuthJson = {
+            auth_mode: "chatgpt",
+            OPENAI_API_KEY: null,
+            tokens: {
+              id_token: idToken,
+              access_token: accessToken,
+              refresh_token: refreshToken || "",
+              account_id: accountId,
+            },
+            last_refresh: exportedAt,
+          };
+          const axonHub = stripUnavailable({
+            auth_mode: "chatgpt",
+            last_refresh: getAxonHubLastRefresh(expiresAt, options.now || new Date()),
+            tokens: {
+              access_token: accessToken,
+              refresh_token: axonHubRefreshToken,
+              id_token: idToken,
+            },
+            axonhub_refresh_token_placeholder: refreshToken ? undefined : true,
+            axonhub_note: refreshToken ? undefined : "refresh_token is a placeholder; access_token works only until it expires.",
+          });
+          const codexManagerTokenHints = Object.fromEntries(Object.entries({
+            account_id: accountId,
+            chatgpt_account_id: chatgptAccountId,
+          }).filter(([, value]) => value !== undefined && value !== null && value !== ""));
+          const codexManagerMeta = Object.fromEntries(Object.entries({
+            label: firstNonEmpty(name, email, sourceName, "ChatGPT Account"),
+            workspace_id: workspaceId,
+            chatgpt_account_id: chatgptAccountId,
+            note: "Imported from ChatGPT session",
+          }).filter(([, value]) => value !== undefined && value !== null && value !== ""));
+          const codexManager = {
+            tokens: {
+              access_token: accessToken,
+              refresh_token: refreshToken || "",
+              id_token: inputIdToken || "",
+              ...codexManagerTokenHints,
+            },
+            meta: codexManagerMeta,
+          };
 
           return {
             sourceName,
@@ -3223,9 +3348,13 @@
             email,
             name,
             expiresAt,
+            accessTokenExpiresAt,
             cpa,
             cockpit,
             nineRouter,
+            codexAuthJson,
+            axonHub,
+            codexManager,
             sub2apiAccount,
           };
         }
@@ -3260,6 +3389,24 @@
             return state.converted.length === 1
               ? state.converted[0].nineRouter
               : state.converted.map((item) => item.nineRouter);
+          }
+
+          if (state.format === "codex") {
+            return state.converted.length === 1
+              ? state.converted[0].codexAuthJson
+              : state.converted.map((item) => item.codexAuthJson);
+          }
+
+          if (state.format === "axonhub") {
+            return state.converted.length === 1
+              ? state.converted[0].axonHub
+              : state.converted.map((item) => item.axonHub);
+          }
+
+          if (state.format === "codexmanager") {
+            return state.converted.length === 1
+              ? state.converted[0].codexManager
+              : state.converted.map((item) => item.codexManager);
           }
 
           return buildSub2apiDocument(state.converted, now);
@@ -3323,7 +3470,7 @@
           elements.statErrors.textContent = String(state.skipped.length);
           elements.statFormat.textContent = OUTPUT_LABELS[state.format];
           elements.outputSubtitle.textContent = `当前输出为 ${OUTPUT_LABELS[state.format]} 导入 JSON。`;
-          elements.cpaNotice.style.display = state.format === "cpa" || state.format === "cockpit" ? "block" : "none";
+          elements.cpaNotice.style.display = ["cpa", "cockpit", "codex", "axonhub", "codexmanager"].includes(state.format) ? "block" : "none";
 
           renderAccounts();
           renderIssues();
